@@ -12,45 +12,60 @@ permissions:
 
 jobs:
   build:
-    name: Build FC Mobile APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Download project
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Check Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls -la "$ANDROID_HOME"
-          which sdkmanager || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Check project
+      - name: Find Android project
+        id: locate
+        shell: bash
         run: |
-          test -f settings.gradle
-          test -f build.gradle
-          test -f app/build.gradle
-          test -f app/src/main/AndroidManifest.xml
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+          find . -name "*.zip" -not -path "./.git/*" -print0 |
+          while IFS= read -r -d '' file; do
+            unzip -oq "$file" -d "${file%.zip}_extracted"
+          done
+
+          PROJECT=$(find . \
+            -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -not -path "./.git/*" \
+            -print -quit)
+
+          if [ -z "$PROJECT" ]; then
+            echo "Android project not found!"
+            echo "Upload the extracted project files to GitHub."
+            exit 1
+          fi
+
+          DIR=$(dirname "$PROJECT")
+          echo "project_dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Found project: $DIR"
 
       - name: Build APK
+        working-directory: ${{ steps.locate.outputs.project_dir }}
         run: gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FC-Mobile-Hub
-          path: app/build/outputs/apk/debug/*.apk
+          name: FC-Mobile-Hub-APK
+          path: ${{ steps.locate.outputs.project_dir }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           
